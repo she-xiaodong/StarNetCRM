@@ -1,0 +1,42 @@
+server:
+  mode: debug     # debug | release
+  port: 8080
+
+mysql:
+  host: 127.0.0.1
+  port: 3306
+  user: root
+  password: "root"
+  database: starnet_crm
+  charset: utf8mb4
+
+neo4j:
+  uri: bolt://localhost:7687
+  user: neo4j
+  password: password
+  database: neo4j
+
+redis:
+  host: 127.0.0.1
+  port: 6379
+  password: ""
+  db: 0
+
+jwt:
+  secret: "starnet-crm-jwt-secret-change-in-production"
+  expire_hours: 24
+
+wecom:
+  corp_id: ""
+  agent_id: ""
+  secret: ""
+  redirect_uri: ""
+  token: ""
+  encoding_aes_key: ""
+
+deploy:
+  mode: standalone   # saas | standalone
+
+security:
+  aes_key: "starnet-aes-key-32-bytes-xxxxx"
+  log_retention: 180

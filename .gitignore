@@ -1,0 +1,33 @@
+# ─── Dependencies ───
+node_modules/
+.pnp/
+
+# ─── Build ───
+dist/
+build/
+
+# ─── IDE ───
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# ─── OS ───
+.DS_Store
+Thumbs.db
+
+# ─── Env ───
+.env.local
+.env*.local
+
+# ─── Logs ───
+logs/
+*.log
+
+# ─── Go backend binary ───
+backend/server
+backend/server.exe
+backend/cmd/server/server
+backend/cmd/server/server.exe
+backend/seed.exe
+*.exe

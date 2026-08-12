@@ -1,0 +1,6 @@
+Trying: root:@tcp(localhost:3306)/ ... PING ERR: Error 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+Trying: root:@tcp(127.0.0.1:3306)/ ... PING ERR: Error 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+Trying: root@tcp(localhost:3306)/ ... PING ERR: Error 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+Trying: root@tcp(127.0.0.1:3306)/ ... PING ERR: Error 1045 (28000): Access denied for user 'root'@'localhost' (using password: NO)
+ALL FAILED
+exit status 1
