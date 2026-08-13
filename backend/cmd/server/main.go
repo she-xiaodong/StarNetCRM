@@ -133,6 +133,7 @@ func setupRoutes(r *gin.Engine) {
 	authHandler := handler.NewAuthHandler()
 	contactHandler := handler.NewContactHandler()
 	graphHandler := handler.NewGraphHandler()
+	relationHandler := handler.NewRelationHandler()
 	tagHandler := handler.NewTagHandler()
 	adminHandler := handler.NewAdminHandler()
 	dashboardHandler := handler.NewDashboardHandler()
@@ -180,6 +181,15 @@ func setupRoutes(r *gin.Engine) {
 			contacts.GET("/:id", contactHandler.Get)
 			contacts.PUT("/:id", contactHandler.Update)
 			contacts.DELETE("/:id", contactHandler.Delete)
+		}
+
+		// 关系（一等公民：亲密度 + 关系标签）
+		relations := authorized.Group("/relations")
+		{
+			relations.GET("", relationHandler.List)
+			relations.POST("", relationHandler.Create)
+			relations.PUT("/:id", relationHandler.Update)
+			relations.DELETE("/:id", relationHandler.Delete)
 		}
 
 		// 图谱

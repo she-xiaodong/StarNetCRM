@@ -33,3 +33,7 @@ backend/cmd/server/server.exe
 backend/seed.exe
 *.exe
 *.exe~
+
+# ─── Temp verification scripts ───
+backend/tmp_*.go
+backend/tmp_*.ps1

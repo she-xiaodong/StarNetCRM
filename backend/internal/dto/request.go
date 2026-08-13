@@ -41,6 +41,11 @@ type CreateContactRequest struct {
 	Tags       []string `json:"tags"`
 	ReferrerID string   `json:"referrer_id"` // 引荐人PersonID（空=直接人脉）
 	Note       string   `json:"note"`
+
+	// 关系信息（可选，同时创建"我→对方"关系记录）
+	RelationType     string   `json:"relation_type"`     // 主关系类型：colleague/customer/...
+	RelationTags     []string `json:"relation_tags"`     // 关系标签
+	RelationStrength int      `json:"relation_strength"` // 亲密度 1-10，缺省 5
 }
 
 // UpdateContactRequest 更新联系人请求
@@ -54,6 +59,11 @@ type UpdateContactRequest struct {
 	Tags       []string `json:"tags"`
 	ReferrerID *string  `json:"referrer_id"` // 引荐人PersonID，传空字符串表示清除引荐人
 	Note       string   `json:"note"`
+
+	// 关系信息（可选，同时创建/更新"我→对方"关系记录）
+	RelationType     *string  `json:"relation_type"`
+	RelationTags     []string `json:"relation_tags"`
+	RelationStrength *int     `json:"relation_strength"`
 }
 
 // ContactListRequest 联系人列表查询

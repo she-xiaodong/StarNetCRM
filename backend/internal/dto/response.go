@@ -24,7 +24,7 @@ type PageData struct {
 // PageRequest 分页请求
 type PageRequest struct {
 	Page     int    `form:"page" json:"page"`
-	PageSize int    `form:"page_size" json:"page_size" binding:"max=100"`
+	PageSize int    `form:"page_size" json:"page_size" binding:"max=1000"`
 	Keyword  string `form:"keyword" json:"keyword"`
 }
 
@@ -35,8 +35,8 @@ func (p *PageRequest) Default() {
 	if p.PageSize <= 0 {
 		p.PageSize = 20
 	}
-	if p.PageSize > 100 {
-		p.PageSize = 100
+	if p.PageSize > 1000 {
+		p.PageSize = 1000
 	}
 }
 

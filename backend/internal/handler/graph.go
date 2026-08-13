@@ -107,57 +107,12 @@ func (h *GraphHandler) SearchPath(c *gin.Context) {
 	dto.Success(c, pathResult)
 }
 
-// CreateRelation 创建关系
+// CreateRelation 创建关系。
+// 双写策略：先写 MySQL relations（亲密度/标签落库），Neo4j 可用时再同步。
 func (h *GraphHandler) CreateRelation(c *gin.Context) {
-	userID, _ := c.Get("user_id")
-
-	if !reponeo4j.IsAvailable() {
-		dto.InternalError(c, "图谱服务未连接，请先配置Neo4j")
-		return
-	}
-
-	var req model.CreateRelationRequest
-	if err := c.ShouldBindJSON(&req); err != nil {
-		dto.BadRequest(c, "参数校验失败: "+err.Error())
-		return
-	}
-
-	ctx := context.Background()
-	session := reponeo4j.NewSession(ctx)
-	defer session.Close(ctx)
-
-	relationID := uuid.New().String()
-	validUntil := req.ValidUntil
-	if validUntil == "" {
-		validUntil = "2099-12-31" // 默认永久
-	}
-
-	isShared := req.IsShared
-	if isShared == "" {
-		isShared = model.VisibilityPrivate
-	}
-
-	err := reponeo4j.CreateRelation(ctx, session, map[string]interface{}{
-		"from_id":     req.FromPersonID,
-		"to_id":       req.ToPersonID,
-		"relation_id": relationID,
-		"type":        req.Type,
-		"source":      req.Source,
-		"strength":    req.Strength,
-		"valid_until": validUntil,
-		"is_shared":   isShared,
-		"created_by":  userID.(string),
-	})
-
-	if err != nil {
-		dto.InternalError(c, "创建关系失败: "+err.Error())
-		return
-	}
-
-	dto.Success(c, gin.H{
-		"id":      relationID,
-		"message": "关系已记录",
-	})
+	// 复用 RelationHandler 的创建逻辑（写 MySQL，Neo4j 可用时双写）
+	relationHandler := NewRelationHandler()
+	relationHandler.Create(c)
 }
 
 // GetSuperConnectors 获取超级连接者
@@ -180,8 +135,10 @@ func (h *GraphHandler) GetSuperConnectors(c *gin.Context) {
 	dto.Success(c, records)
 }
 
-// buildMysqlFallbackGraph Neo4j不可用时，使用MySQL联系人数据兜底构建多级引荐图谱。
-// 通过联系人 referrer_id 构建引荐层级：一级人脉直连"我"，二级/三级人脉通过引荐链逐级连接。
+// buildMysqlFallbackGraph Neo4j不可用时，使用MySQL兜底构建关系图谱。
+// 边的 type/strength/tags 全部来自 relations 表（真实数据），不再使用假亲密度或联系人标签硬凑。
+// 兜底规则：中心节点只能与一级人脉直接连线；二/三/四级人脉只能经由引荐链（referral 边）
+// 通过一级人脉逐级连线，禁止跳级连线。若联系人没有任何关系记录，则不展示（避免噪音）。
 func (h *GraphHandler) buildMysqlFallbackGraph(c *gin.Context, centerID string) model.GraphData {
 	tenantID, _ := c.Get("tenant_id")
 	tenantIDStr, _ := tenantID.(string)
@@ -193,18 +150,7 @@ func (h *GraphHandler) buildMysqlFallbackGraph(c *gin.Context, centerID string) 
 		}
 	}
 
-	// 标签 ID -> 名称 映射（用于边的关系类型展示）
-	idToName := map[string]string{}
-	if tenantIDStr != "" {
-		var tagList []model.Tag
-		if err := repomysql.DB.Where("tenant_id = ?", tenantIDStr).Find(&tagList).Error; err == nil {
-			for _, t := range tagList {
-				idToName[t.ID] = t.Name
-			}
-		}
-	}
-
-	// PersonID -> Contact 映射（含别名键：Contact.ID）
+	// PersonID -> Contact 映射
 	byID := make(map[string]*model.Contact)
 	for i := range contacts {
 		cnt := &contacts[i]
@@ -214,103 +160,214 @@ func (h *GraphHandler) buildMysqlFallbackGraph(c *gin.Context, centerID string) 
 		byID[cnt.ID] = cnt
 	}
 
-	// 计算每个联系人的引荐层级（level 1 = 直接人脉）
-	type levelInfo struct {
-		level      int
-		referrerID string
-	}
-	levels := make(map[string]levelInfo)
-	for _, contact := range contacts {
-		nodeID := contact.PersonID
-		if nodeID == "" {
-			nodeID = contact.ID
+	// 关系记录：type/strength/tags 真实数据
+	var relations []model.Relation
+	if tenantIDStr != "" {
+		if err := repomysql.DB.Where("tenant_id = ?", tenantIDStr).Find(&relations).Error; err != nil {
+			relations = nil
 		}
-		lv := 1
-		refID := contact.ReferrerID
-		visited := map[string]bool{nodeID: true}
-		for refID != "" && lv < 6 {
-			if visited[refID] {
-				break
-			}
-			visited[refID] = true
-			ref, ok := byID[refID]
-			if !ok {
-				// 引荐人不存在（可能不是当前用户直接录入的联系人），视为直接人脉
-				break
-			}
-			lv++
-			refID = ref.ReferrerID
-		}
-		levels[nodeID] = levelInfo{level: lv, referrerID: contact.ReferrerID}
 	}
+	for i := range relations {
+		relations[i].UnmarshalTags()
+	}
+	// 将关系 tags 中的标签 ID 解析为名称，避免图谱 tooltip 显示 UUID 乱码
+	ptrList := make([]*model.Relation, len(relations))
+	for i := range relations {
+		ptrList[i] = &relations[i]
+	}
+	resolveRelationTagNames(c, ptrList)
 
-	// 第一遍：先构建全部节点，确保引荐人节点一定存在
+	// 中心节点
 	nodes := []model.GraphNode{{
 		ID:    centerID,
 		Label: "我",
+		Type:  "center",
+		Style: map[string]interface{}{},
 		Properties: map[string]interface{}{
 			"name":  "我",
 			"level": 0,
 		},
 	}}
 	nodeSet := map[string]bool{centerID: true}
-	for _, contact := range contacts {
-		nodeID := contact.PersonID
-		if nodeID == "" {
-			nodeID = contact.ID
-		}
-		if nodeSet[nodeID] {
+	edges := []model.GraphEdge{}
+
+	// 人脉层级：沿引荐链传播（无有效引荐人的联系人为 1 级，被引荐者逐级 +1）。
+	// 说明：relations 表的关系都以当前用户为中心，若用最短路径 BFS 层级恒为 1，
+	// 因此用 contacts.referrer_id 引荐链体现多级人脉（1级=直接发展，2级=被1级引荐…）。
+	levelOf := map[string]int{centerID: 0}
+	childrenOf := make(map[string][]string)
+	hasRef := make(map[string]bool)
+	for i := range contacts {
+		cnt := &contacts[i]
+		if cnt.PersonID == "" {
 			continue
 		}
-		nodeSet[nodeID] = true
-		info := levels[nodeID]
+		if cnt.ReferrerID != "" {
+			if _, ok := byID[cnt.ReferrerID]; ok {
+				hasRef[cnt.PersonID] = true
+				childrenOf[cnt.ReferrerID] = append(childrenOf[cnt.ReferrerID], cnt.PersonID)
+			}
+		}
+	}
+	queue := []string{}
+	for i := range contacts {
+		cnt := &contacts[i]
+		if cnt.PersonID == "" || hasRef[cnt.PersonID] {
+			continue
+		}
+		levelOf[cnt.PersonID] = 1
+		queue = append(queue, cnt.PersonID)
+	}
+	for len(queue) > 0 {
+		cur := queue[0]
+		queue = queue[1:]
+		for _, child := range childrenOf[cur] {
+			if _, visited := levelOf[child]; visited {
+				continue
+			}
+			levelOf[child] = levelOf[cur] + 1
+			if levelOf[child] <= 4 {
+				queue = append(queue, child)
+			}
+		}
+	}
+	// 未进入引荐链但存在关系记录的联系人，按直接连接视为 1 级
+	for _, rel := range relations {
+		for _, pid := range []string{rel.FromPersonID, rel.ToPersonID} {
+			if pid == centerID {
+				continue
+			}
+			if _, ok := levelOf[pid]; !ok {
+				levelOf[pid] = 1
+			}
+		}
+	}
+
+	// 节点确保函数：将 pid 加入节点集合（若尚未加入）
+	ensureNode := func(pid string) {
+		if nodeSet[pid] {
+			return
+		}
+		nodeSet[pid] = true
+		label := pid
+		level, levelKnown := levelOf[pid]
+		if !levelKnown {
+			level = 1
+		}
+		contact := byID[pid]
+		if contact != nil {
+			label = contact.Name
+		}
 		nodes = append(nodes, model.GraphNode{
-			ID:    nodeID,
-			Label: contact.Name,
+			ID:    pid,
+			Label: label,
 			Type:  "person",
 			Properties: map[string]interface{}{
-				"name":       contact.Name,
-				"company":    contact.Company,
-				"title":      contact.Title,
-				"department": contact.Department,
-				"phone":      contact.Phone,
-				"email":      contact.Email,
-				"level":      info.level,
+				"name":       label,
+				"company":    contactValue(contact, "company"),
+				"title":      contactValue(contact, "title"),
+				"department": contactValue(contact, "department"),
+				"level":      level,
 			},
 		})
 	}
 
-	// 第二遍：构建边。多级联系人连到其引荐人，一级人脉连到"我"
-	edges := []model.GraphEdge{}
-	for i, contact := range contacts {
-		nodeID := contact.PersonID
-		if nodeID == "" {
-			nodeID = contact.ID
+	// 收集关系中出现的节点并构建边
+	seenRelation := map[string]bool{}
+	for _, rel := range relations {
+		fromID := rel.FromPersonID
+		toID := rel.ToPersonID
+		if fromID == "" || toID == "" {
+			continue
 		}
-		info := levels[nodeID]
 
-		source := centerID
-		edgeType := firstTag(contact.Tags, idToName)
-		if info.referrerID != "" {
-			if ref, ok := byID[info.referrerID]; ok {
-				refNodeID := ref.PersonID
-				if refNodeID == "" {
-					refNodeID = ref.ID
-				}
-				if nodeSet[refNodeID] {
-					source = refNodeID
-					edgeType = "referral"
-				}
+		// 只展示以中心为端点或双方都在租户内的关系
+		fromOK := fromID == centerID || byID[fromID] != nil
+		toOK := toID == centerID || byID[toID] != nil
+		if !fromOK || !toOK {
+			continue
+		}
+
+		// 人脉连线规则：只允许逐级连线，禁止跳级。
+		// 中心节点只能直接连接一级人脉；与二/三/四级人脉的直接关系边不绘制，
+		// 这些深层人脉只能经由引荐链（referral 边）通过一级人脉逐级连线。
+		lvFrom := levelOf[fromID]
+		lvTo := levelOf[toID]
+		if (fromID == centerID && lvTo > 1) || (toID == centerID && lvFrom > 1) {
+			continue
+		}
+		// 非中心节点之间的连线同样不允许跳级（层级相差超过 1 则跳过）
+		if fromID != centerID && toID != centerID {
+			diff := lvFrom - lvTo
+			if diff < 0 {
+				diff = -diff
+			}
+			if diff > 1 {
+				continue
 			}
 		}
+
+		// 添加节点
+		ensureNode(fromID)
+		ensureNode(toID)
+
+		// 关系标签作为边属性
+		props := map[string]interface{}{
+			"tags":     rel.Tags,
+			"note":     rel.Note,
+			"from_id":  fromID,
+			"relation_id": rel.ID,
+		}
+
+		edgeID := rel.ID
+		if edgeID == "" {
+			edgeID = uuid.New().String()
+		}
+		if seenRelation[fromID+"->"+toID] {
+			continue // 同方向关系只显示一次
+		}
+		seenRelation[fromID+"->"+toID] = true
+
 		edges = append(edges, model.GraphEdge{
-			Source:   source,
-			Target:   nodeID,
-			Type:     edgeType,
-			Strength: (i % 9) + 1,
+			ID:       edgeID,
+			Source:   fromID,
+			Target:   toID,
+			Type:     rel.Type,
+			Strength: rel.Strength,
+			Label:    RelationTypeName(rel.Type),
+			Properties: props,
+		})
+	}
+
+	// 追加引荐边：联系人 → 其引荐人（contacts.referrer_id），形成多级人脉层级
+	for i := range contacts {
+		cnt := &contacts[i]
+		if cnt.PersonID == "" || cnt.ReferrerID == "" {
+			continue
+		}
+		if _, ok := byID[cnt.ReferrerID]; !ok {
+			continue
+		}
+		childID := cnt.PersonID
+		parentID := cnt.ReferrerID
+		ensureNode(childID)
+		ensureNode(parentID)
+		// 无向去重：relations 表可能已有该引荐边（方向 引荐人→被引荐者），避免重复绘制
+		if seenRelation[childID+"->"+parentID] || seenRelation[parentID+"->"+childID] {
+			continue
+		}
+		seenRelation[childID+"->"+parentID] = true
+		edges = append(edges, model.GraphEdge{
+			ID:       uuid.New().String(),
+			Source:   childID,
+			Target:   parentID,
+			Type:     "referral",
+			Strength: 0,
 			Label:    "引荐",
 			Properties: map[string]interface{}{
-				"level": info.level,
+				"tags":     []string{},
+				"note":     "引荐关系",
+				"from_id":  childID,
 			},
 		})
 	}
@@ -321,19 +378,20 @@ func (h *GraphHandler) buildMysqlFallbackGraph(c *gin.Context, centerID string) 
 	}
 }
 
-// firstTag 从JSON标签数组中取第一个标签作为关系类型，ID会映射为名称，空则默认friend
-func firstTag(tagsJSON string, idToName map[string]string) string {
-	if tagsJSON == "" {
-		return "friend"
+// contactValue 获取联系人字段值（nil 安全）
+func contactValue(contact *model.Contact, field string) string {
+	if contact == nil {
+		return ""
 	}
-	var tags []string
-	if json.Unmarshal([]byte(tagsJSON), &tags) == nil && len(tags) > 0 {
-		if name, ok := idToName[tags[0]]; ok {
-			return name
-		}
-		return tags[0]
+	switch field {
+	case "company":
+		return contact.Company
+	case "title":
+		return contact.Title
+	case "department":
+		return contact.Department
 	}
-	return "friend"
+	return ""
 }
 
 // buildGraphData 构建G6格式图谱数据

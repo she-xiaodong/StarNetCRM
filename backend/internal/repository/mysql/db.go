@@ -44,6 +44,7 @@ func AutoMigrate() error {
 		&model.Contact{},
 		&model.Tag{},
 		&model.Referral{},
+		&model.Relation{},
 		&model.OperationLog{},
 		&model.Subscription{},
 	)

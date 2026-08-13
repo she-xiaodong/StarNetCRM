@@ -124,6 +124,48 @@ export function searchPath(startId: string, endId: string) {
   return request.post('/graph/search-path', { start_id: startId, end_id: endId })
 }
 
+// ─── 关系（亲密度 + 关系标签）───
+export interface Relation {
+  id: string
+  tenant_id?: string
+  from_person_id: string
+  to_person_id: string
+  type: string
+  tags: string[]
+  strength: number
+  note?: string
+  created_by?: string
+  created_at?: string
+  updated_at?: string
+  to_name?: string
+  to_company?: string
+  to_title?: string
+  from_name?: string
+}
+export interface RelationListParams {
+  person_id?: string
+  rel_type?: string
+  page?: number
+  page_size?: number
+}
+export function getRelations(params?: RelationListParams) {
+  return request.get('/relations', { params })
+}
+export function createRelationV2(data: {
+  from_person_id?: string; to_person_id: string; type?: string; source?: string
+  tags?: string[]; strength?: number; note?: string
+}) {
+  return request.post('/relations', data)
+}
+export function updateRelation(id: string, data: {
+  type?: string; tags?: string[]; strength?: number; note?: string
+}) {
+  return request.put(`/relations/${id}`, data)
+}
+export function deleteRelation(id: string) {
+  return request.delete(`/relations/${id}`)
+}
+
 // ─── 标签管理 ───
 export function getTags() {
   return request.get('/tags')

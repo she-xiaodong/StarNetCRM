@@ -40,6 +40,34 @@ const LEVEL_SIZES = [52, 34, 28, 24, 22]
 // 分批出现的间隔(ms)：中心 → 一级 → 二级 → 三级 → 四级
 const REVEAL_INTERVAL = 600
 
+// 亲密度映射：1-10 → 边的粗细(1~7)与颜色深浅
+function strengthWidth(strength: number): number {
+  const s = Math.max(1, Math.min(10, Number(strength) || 5))
+  return 1 + ((s - 1) / 9) * 6
+}
+function strengthColor(strength: number): string {
+  const s = Math.max(1, Math.min(10, Number(strength) || 5))
+  // 低亲密度浅灰 → 高亲密度深蓝
+  const alpha = 0.18 + (s / 10) * 0.72
+  return `rgba(43, 95, 215, ${alpha.toFixed(2)})`
+}
+function strengthName(strength: number): string {
+  const map: Record<number, string> = {
+    1: '点头之交', 2: '泛泛之交', 3: '一般', 4: '较熟', 5: '熟识',
+    6: '良好', 7: '亲近', 8: '亲密', 9: '非常亲密', 10: '挚友',
+  }
+  const s = Math.max(1, Math.min(10, Number(strength) || 5))
+  return map[s] || `亲密度${s}`
+}
+// 关系类型中文名
+const RELATION_LABELS: Record<string, string> = {
+  colleague: '同事', manager: '上下级', customer: '客户', partner: '合作伙伴',
+  alumni: '校友', friend: '朋友', referral: '引荐', custom: '自定义',
+}
+function relationLabel(type: string): string {
+  return RELATION_LABELS[type] || type || ''
+}
+
 function getLevel(props: any): number {
   const lv = Number(props?.level)
   if (Number.isNaN(lv) || lv < 0) return 1
@@ -135,22 +163,51 @@ function renderGraph(apiNodes: any[], apiEdges: any[]) {
     })
   }
 
-  // 构建 ECharts 边：默认不显示文字，hover 时显示"引荐"关系，避免满屏文字遮挡节点
+  // 构建 ECharts 边：
+  // - 粗细/颜色按亲密度映射（亲密度高 → 线更粗更深）
+  // - 关系类型标签显示在边中间
+  // - hover 显示"类型 · 亲密度(等级)"，tooltip 显示备注
   const chartEdges = apiEdges.map((e: any) => {
-    const isReferral = e.label === '引荐' || e.type === 'referral'
+    const strength = Number(e.strength) || 5
+    const labelText = relationLabel(e.type || e.label)
+    const showLabel = !!labelText && labelText !== '引荐' // 引荐线保持简洁
     return {
       source: e.source,
       target: e.target,
-      label: { show: false },
+      type: e.type || 'friend',
+      strength,
+      note: e.properties?.note || '',
+      tags: e.properties?.tags || e.tags || [],
+      label: showLabel
+        ? {
+            show: true,
+            position: 'middle',
+            formatter: labelText,
+            fontSize: 9,
+            color: '#666',
+            backgroundColor: '#fff',
+            padding: [1, 4],
+            borderRadius: 8,
+          }
+        : { show: false },
       emphasis: {
-        label: isReferral
-          ? { show: true, formatter: '引荐', fontSize: 10, color: '#666', backgroundColor: '#fff', padding: [2, 4] }
-          : { show: false },
+        label: {
+          show: true,
+          position: 'middle',
+          formatter: `${labelText} · ${strengthName(strength)}(${strength})`,
+          fontSize: 11,
+          color: '#2B5FD7',
+          backgroundColor: '#fff',
+          padding: [2, 6],
+          borderRadius: 10,
+        },
+        lineStyle: { width: Math.max(3, strengthWidth(strength) + 1.5) },
       },
       lineStyle: {
-        color: '#bfbfbf',
-        width: 1.5,
+        color: strengthColor(strength),
+        width: strengthWidth(strength),
         curveness: 0.2,
+        opacity: 0.75,
       },
     }
   })
@@ -202,8 +259,15 @@ function renderGraph(apiNodes: any[], apiEdges: any[]) {
           if (d.title) tip += `<br/>职位: ${d.title}`
           return tip
         }
-        if (params.dataType === 'edge' && params.data.label?.formatter) {
-          return `引荐关系`
+        if (params.dataType === 'edge' && params.data) {
+          const d = params.data
+          const labelText = relationLabel(d.type || d.label)
+          let tip = `<b>${labelText || '关系'}</b>`
+          if (d.strength) tip += `<br/>亲密度: ${d.strength} (${strengthName(d.strength)})`
+          const tags = d.tags
+          if (Array.isArray(tags) && tags.length) tip += `<br/>标签: ${tags.join(' / ')}`
+          if (d.note) tip += `<br/>备注: ${d.note}`
+          return tip
         }
         return ''
       },

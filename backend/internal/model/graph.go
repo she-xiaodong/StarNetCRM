@@ -101,14 +101,4 @@ type SearchPathRequest struct {
 	MaxDepth      int    `json:"max_depth"` // 默认6
 }
 
-// CreateRelationRequest 创建关系请求
-type CreateRelationRequest struct {
-	FromPersonID string `json:"from_person_id" binding:"required"`
-	ToPersonID   string `json:"to_person_id" binding:"required"`
-	Type         string `json:"type" binding:"required"`
-	Source       string `json:"source"`
-	Strength     int    `json:"strength" binding:"min=1,max=10"`
-	ValidUntil   string `json:"valid_until"`
-	IsShared     string `json:"is_shared"` // private/department/company
-	Note         string `json:"note"`
-}
+

@@ -181,6 +181,15 @@ func (h *ContactHandler) Create(c *gin.Context) {
 		}
 	}
 
+	// 同步创建"我→对方"关系记录（亲密度/关系标签），若指定了关系信息
+	if req.RelationType != "" || len(req.RelationTags) > 0 || req.RelationStrength > 0 {
+		strength := req.RelationStrength
+		if strength == 0 {
+			strength = 5
+		}
+		UpsertMyRelation(tenantID.(string), userID.(string), personID, req.RelationType, req.RelationTags, strength, c)
+	}
+
 	dto.Success(c, contact)
 }
 
@@ -261,6 +270,24 @@ func (h *ContactHandler) Update(c *gin.Context) {
 			dto.InternalError(c, "更新失败")
 			return
 		}
+	}
+
+	// 同步更新"我→对方"关系记录（若传了关系信息）
+	if req.RelationType != nil || req.RelationTags != nil || req.RelationStrength != nil {
+		relType := ""
+		if req.RelationType != nil {
+			relType = *req.RelationType
+		}
+		tags := req.RelationTags
+		if tags == nil {
+			tags = []string{}
+		}
+		strength := 0
+		if req.RelationStrength != nil {
+			strength = *req.RelationStrength
+		}
+		userID, _ := c.Get("user_id")
+		UpsertMyRelation(tenantID.(string), userID.(string), contact.PersonID, relType, tags, strength, c)
 	}
 
 	dto.Success(c, contact)

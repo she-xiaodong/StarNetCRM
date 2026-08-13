@@ -98,6 +98,30 @@ func CreateRelation(ctx context.Context, session neo4j.SessionWithContext, props
 	return err
 }
 
+// UpdateRelation 更新关系属性（type/strength）
+func UpdateRelation(ctx context.Context, session neo4j.SessionWithContext, props map[string]interface{}) error {
+	_, err := session.Run(ctx,
+		`MATCH (a:Person {id: $from_id})-[r:RELATES_TO {relation_id: $relation_id}]->(b:Person {id: $to_id})
+		 SET r.type = $type, r.strength = $strength, r.update_time = datetime()
+		 RETURN r`,
+		props,
+	)
+	return err
+}
+
+// DeleteRelation 删除两个 Person 之间的 RELATES_TO 关系
+func DeleteRelation(ctx context.Context, session neo4j.SessionWithContext, fromID, toID string) error {
+	_, err := session.Run(ctx,
+		`MATCH (a:Person {id: $from_id})-[r:RELATES_TO]->(b:Person {id: $to_id})
+		 DELETE r`,
+		map[string]interface{}{
+			"from_id": fromID,
+			"to_id":   toID,
+		},
+	)
+	return err
+}
+
 // EnsurePerson 确保Person节点存在（不存在则创建，存在则更新name）
 func EnsurePerson(ctx context.Context, session neo4j.SessionWithContext, id, name string) error {
 	_, err := session.Run(ctx,
