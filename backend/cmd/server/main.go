@@ -135,6 +135,7 @@ func setupRoutes(r *gin.Engine) {
 	graphHandler := handler.NewGraphHandler()
 	tagHandler := handler.NewTagHandler()
 	adminHandler := handler.NewAdminHandler()
+	dashboardHandler := handler.NewDashboardHandler()
 
 	// 健康检查
 	r.GET("/health", func(c *gin.Context) {
@@ -202,7 +203,8 @@ func setupRoutes(r *gin.Engine) {
 		// 统计
 		stats := authorized.Group("/stats")
 		{
-			stats.GET("/dashboard")
+			stats.GET("/dashboard", dashboardHandler.Stats)
+			stats.GET("/analytics", dashboardHandler.Analytics)
 		}
 
 		// 导入导出

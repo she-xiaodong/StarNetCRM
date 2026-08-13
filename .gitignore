@@ -5,6 +5,7 @@ node_modules/
 # ─── Build ───
 dist/
 build/
+frontend/frontend/
 
 # ─── IDE ───
 .idea/
@@ -31,3 +32,4 @@ backend/cmd/server/server
 backend/cmd/server/server.exe
 backend/seed.exe
 *.exe
+*.exe~

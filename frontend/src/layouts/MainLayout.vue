@@ -49,10 +49,6 @@
           <TagsOutlined />
           <span>标签库</span>
         </a-menu-item>
-        <a-menu-item key="admin" v-if="authStore.isAdmin">
-          <SettingOutlined />
-          <span>管理后台</span>
-        </a-menu-item>
       </a-menu>
     </a-layout-sider>
 
@@ -121,7 +117,6 @@ import {
   SendOutlined,
   BarChartOutlined,
   TagsOutlined,
-  SettingOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   UserOutlined,

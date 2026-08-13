@@ -39,6 +39,7 @@ type CreateContactRequest struct {
 	Email      string   `json:"email"`
 	Department string   `json:"department"`
 	Tags       []string `json:"tags"`
+	ReferrerID string   `json:"referrer_id"` // 引荐人PersonID（空=直接人脉）
 	Note       string   `json:"note"`
 }
 
@@ -51,6 +52,7 @@ type UpdateContactRequest struct {
 	Email      string   `json:"email"`
 	Department string   `json:"department"`
 	Tags       []string `json:"tags"`
+	ReferrerID *string  `json:"referrer_id"` // 引荐人PersonID，传空字符串表示清除引荐人
 	Note       string   `json:"note"`
 }
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
@@ -55,6 +56,14 @@ func (h *ContactHandler) List(c *gin.Context) {
 		return
 	}
 
+	// 将 tags 中的标签 ID 解析为名称（兼容已存名称的情况）
+	ptrContacts := make([]*model.Contact, len(contacts))
+	for i := range contacts {
+		ptrContacts[i] = &contacts[i]
+	}
+	resolveTagNames(c, ptrContacts)
+	fillReferrerPaths(c, ptrContacts)
+
 	dto.SuccessPage(c, dto.PageData{
 		Total:    total,
 		Page:     req.Page,
@@ -84,6 +93,19 @@ func (h *ContactHandler) Create(c *gin.Context) {
 		}
 	}
 
+	// 校验引荐人属于当前租户且不能引荐自己
+	if req.ReferrerID != "" {
+		if req.ReferrerID == personID {
+			dto.BadRequest(c, "引荐人不能是自己")
+			return
+		}
+		var referrer model.Contact
+		if err := repomysql.DB.Where("tenant_id = ? AND person_id = ?", tenantID, req.ReferrerID).First(&referrer).Error; err != nil {
+			dto.BadRequest(c, "引荐人不存在")
+			return
+		}
+	}
+
 	// 写入MySQL
 	contact := model.Contact{
 		ID:         uuid.New().String(),
@@ -96,6 +118,7 @@ func (h *ContactHandler) Create(c *gin.Context) {
 		Email:      req.Email,
 		Department: req.Department,
 		Tags:       tagsJSON,
+		ReferrerID: req.ReferrerID,
 		CreatedBy:  userID.(string),
 	}
 
@@ -172,6 +195,10 @@ func (h *ContactHandler) Get(c *gin.Context) {
 		return
 	}
 
+	// 将 tags 中的标签 ID 解析为名称
+	resolveTagNames(c, []*model.Contact{&contact})
+	fillReferrerPaths(c, []*model.Contact{&contact})
+
 	dto.Success(c, contact)
 }
 
@@ -216,6 +243,18 @@ func (h *ContactHandler) Update(c *gin.Context) {
 			updates["tags"] = string(b)
 		}
 	}
+	if req.ReferrerID != nil {
+		if *req.ReferrerID != "" && *req.ReferrerID != contact.PersonID {
+			var referrer model.Contact
+			if err := repomysql.DB.Where("tenant_id = ? AND person_id = ?", tenantID, *req.ReferrerID).First(&referrer).Error; err != nil {
+				dto.BadRequest(c, "引荐人不存在")
+				return
+			}
+			updates["referrer_id"] = *req.ReferrerID
+		} else {
+			updates["referrer_id"] = ""
+		}
+	}
 
 	if len(updates) > 0 {
 		if err := repomysql.DB.Model(&contact).Updates(updates).Error; err != nil {
@@ -246,4 +285,112 @@ func (h *ContactHandler) Delete(c *gin.Context) {
 	// TODO: 同时删除Neo4j中的节点
 
 	dto.Success(c, gin.H{"message": "删除成功"})
+}
+
+// resolveTagNames 将联系人 tags 中的标签 ID 解析为名称（兼容已直接存名称的情况）
+func resolveTagNames(c *gin.Context, contacts []*model.Contact) {
+	if len(contacts) == 0 {
+		return
+	}
+	tenantID, _ := c.Get("tenant_id")
+
+	// 收集所有 tag 引用
+	idSet := map[string]struct{}{}
+	for _, contact := range contacts {
+		var tags []string
+		if err := json.Unmarshal([]byte(contact.Tags), &tags); err != nil || len(tags) == 0 {
+			continue
+		}
+		for _, t := range tags {
+			idSet[t] = struct{}{}
+		}
+	}
+	if len(idSet) == 0 {
+		return
+	}
+
+	// 查询标签表，建立 ID -> 名称 映射
+	ids := make([]string, 0, len(idSet))
+	for id := range idSet {
+		ids = append(ids, id)
+	}
+	var tags []model.Tag
+	if err := repomysql.DB.Where("tenant_id = ? AND id IN ?", tenantID, ids).Find(&tags).Error; err != nil {
+		return
+	}
+	idToName := make(map[string]string)
+	for _, tag := range tags {
+		idToName[tag.ID] = tag.Name
+	}
+
+	// 替换 tag ID 为名称，未命中的保留原值（已是名称）
+	for _, contact := range contacts {
+		var tagList []string
+		if err := json.Unmarshal([]byte(contact.Tags), &tagList); err != nil || len(tagList) == 0 {
+			continue
+		}
+		changed := false
+		for i, t := range tagList {
+			if name, ok := idToName[t]; ok {
+				tagList[i] = name
+				changed = true
+			}
+		}
+		if changed {
+			if b, err := json.Marshal(tagList); err == nil {
+				contact.Tags = string(b)
+			}
+		}
+	}
+}
+
+// fillReferrerPaths 计算联系人的引荐路径（沿 referrer_id 逐级上溯到当前用户）
+// 直接人脉：["我"]；多级人脉：["我","张三","李四"]，文本格式 "我 → 张三 → 李四"
+func fillReferrerPaths(c *gin.Context, contacts []*model.Contact) {
+	if len(contacts) == 0 {
+		return
+	}
+	tenantID, _ := c.Get("tenant_id")
+
+	// 查询该租户全量联系人，建立 PersonID -> Contact 映射
+	var all []model.Contact
+	if err := repomysql.DB.Where("tenant_id = ?", tenantID).Find(&all).Error; err != nil {
+		return
+	}
+	byPersonID := make(map[string]*model.Contact, len(all))
+	for i := range all {
+		byPersonID[all[i].PersonID] = &all[i]
+	}
+
+	for _, contact := range contacts {
+		// 沿 referrer 链从联系人上溯，收集 [联系人, 引荐人, 引荐人的引荐人...]
+		chain := []string{contact.Name}
+		pid := contact.ReferrerID
+		visited := map[string]bool{contact.PersonID: true}
+		for pid != "" && len(chain) < 10 {
+			if visited[pid] {
+				break
+			}
+			visited[pid] = true
+			referrer, ok := byPersonID[pid]
+			if !ok {
+				break
+			}
+			chain = append(chain, referrer.Name)
+			pid = referrer.ReferrerID
+		}
+
+		if len(chain) == 1 {
+			// 直接人脉（一级）
+			contact.ReferrerPath = []string{"我"}
+			contact.ReferrerPathText = "我"
+			continue
+		}
+		// 反转链：["李四","张三"] -> ["张三","李四"]，再拼接"我"
+		for i, j := 0, len(chain)-1; i < j; i, j = i+1, j-1 {
+			chain[i], chain[j] = chain[j], chain[i]
+		}
+		contact.ReferrerPath = append([]string{"我"}, chain...)
+		contact.ReferrerPathText = strings.Join(contact.ReferrerPath, " → ")
+	}
 }

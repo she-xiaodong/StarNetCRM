@@ -15,7 +15,7 @@
               <TeamOutlined />
             </div>
             <div class="stat-info">
-              <span class="stat-value">128</span>
+              <span class="stat-value">{{ stats.total_contacts }}</span>
               <span class="stat-label">联系人数</span>
             </div>
           </div>
@@ -28,7 +28,7 @@
               <ApartmentOutlined />
             </div>
             <div class="stat-info">
-              <span class="stat-value">356</span>
+              <span class="stat-value">{{ stats.total_relations }}</span>
               <span class="stat-label">关系连结数</span>
             </div>
           </div>
@@ -41,7 +41,7 @@
               <SendOutlined />
             </div>
             <div class="stat-info">
-              <span class="stat-value">12</span>
+              <span class="stat-value">{{ stats.active_referrals }}</span>
               <span class="stat-label">引荐进行中</span>
             </div>
           </div>
@@ -54,7 +54,7 @@
               <TrophyOutlined />
             </div>
             <div class="stat-info">
-              <span class="stat-value">85</span>
+              <span class="stat-value">{{ stats.network_score }}</span>
               <span class="stat-label">人脉评分</span>
             </div>
           </div>
@@ -68,12 +68,12 @@
       <a-col :xs="24" :lg="12">
         <a-card title="最近添加的联系人" size="small">
           <template #extra>
-            <a @click="$router.push('/contacts')">查看全部</a>
+            <a @click="$router.push('/app/contacts')">查看全部</a>
           </template>
           <a-list :data-source="recentContacts" size="small">
             <template #renderItem="{ item }">
               <a-list-item>
-                <a-list-item-meta :title="item.name" :description="item.company">
+                <a-list-item-meta :title="item.name" :description="item.company || item.title || '—'">
                   <template #avatar>
                     <a-avatar :style="{ backgroundColor: '#2B5FD7' }">
                       {{ item.name.charAt(0) }}
@@ -81,7 +81,7 @@
                   </template>
                 </a-list-item-meta>
                 <template #actions>
-                  <a-tag color="blue">{{ item.relation }}</a-tag>
+                  <a-tag color="blue">{{ item.relation || '人脉' }}</a-tag>
                 </template>
               </a-list-item>
             </template>
@@ -94,7 +94,7 @@
         <a-card title="快速操作" size="small">
           <a-row :gutter="[16, 16]">
             <a-col :span="8">
-              <div class="quick-action" @click="$router.push('/contacts')">
+              <div class="quick-action" @click="$router.push('/app/contacts')">
                 <div class="action-icon" style="background: #e6f0ff">
                   <TeamOutlined style="color: #2B5FD7; font-size: 24px" />
                 </div>
@@ -102,7 +102,7 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="quick-action" @click="$router.push('/graph')">
+              <div class="quick-action" @click="$router.push('/app/graph')">
                 <div class="action-icon" style="background: #e6ffe6">
                   <ApartmentOutlined style="color: #00C9A7; font-size: 24px" />
                 </div>
@@ -110,7 +110,7 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="quick-action" @click="$router.push('/path-search')">
+              <div class="quick-action" @click="$router.push('/app/path-search')">
                 <div class="action-icon" style="background: #fff7e6">
                   <SearchOutlined style="color: #F5A623; font-size: 24px" />
                 </div>
@@ -118,7 +118,7 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="quick-action" @click="$router.push('/referral')">
+              <div class="quick-action" @click="$router.push('/app/referral')">
                 <div class="action-icon" style="background: #ffe6f0">
                   <SendOutlined style="color: #FF6B6B; font-size: 24px" />
                 </div>
@@ -134,7 +134,7 @@
               </div>
             </a-col>
             <a-col :span="8">
-              <div class="quick-action" @click="$router.push('/analytics')">
+              <div class="quick-action" @click="$router.push('/app/analytics')">
                 <div class="action-icon" style="background: #e6f4ff">
                   <BarChartOutlined style="color: #1890FF; font-size: 24px" />
                 </div>
@@ -149,8 +149,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { onMounted, ref } from 'vue'
 import { useAuthStore } from '@/stores/auth'
+import { getDashboardStats, type DashboardStats } from '@/api'
 import {
   TeamOutlined,
   ApartmentOutlined,
@@ -163,12 +164,62 @@ import {
 
 const authStore = useAuthStore()
 
-const recentContacts = ref([
-  { name: '张三', company: '阿里巴巴', relation: '同事' },
-  { name: '李四', company: '腾讯科技', relation: '合作伙伴' },
-  { name: '王五', company: '字节跳动', relation: '客户' },
-  { name: '赵六', company: '百度集团', relation: '校友' },
-])
+const stats = ref<DashboardStats>({
+  total_contacts: 0,
+  total_relations: 0,
+  active_referrals: 0,
+  network_score: 0,
+  recent_contacts: [],
+})
+
+interface RecentContact {
+  id: string
+  name: string
+  company?: string
+  title?: string
+  relation?: string
+}
+
+const recentContacts = ref<RecentContact[]>([])
+
+// 解析 tags JSON 字符串，取第一个标签作为关系展示
+function parseTags(tags?: string): string[] {
+  if (!tags) return []
+  try {
+    const parsed = JSON.parse(tags)
+    return Array.isArray(parsed) ? parsed : []
+  } catch {
+    return tags ? [tags] : []
+  }
+}
+
+async function loadDashboard() {
+  try {
+    const res = await getDashboardStats()
+    const data = res.data.data
+    stats.value = {
+      ...data,
+      total_contacts: Number(data.total_contacts) || 0,
+      total_relations: Number(data.total_relations) || 0,
+      active_referrals: Number(data.active_referrals) || 0,
+      network_score: Number(data.network_score) || 0,
+    }
+    recentContacts.value = (data.recent_contacts || []).map((item) => {
+      const tags = parseTags(item.tags)
+      return {
+        id: item.id,
+        name: item.name,
+        company: item.company,
+        title: item.title,
+        relation: tags.length > 0 ? tags[0] : undefined,
+      }
+    })
+  } catch (e) {
+    // 请求失败时保持默认空数据
+  }
+}
+
+onMounted(loadDashboard)
 </script>
 
 <style lang="less" scoped>

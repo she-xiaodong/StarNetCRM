@@ -12,7 +12,8 @@
           <a @click="scrollTo('features')">产品功能</a>
           <a @click="scrollTo('pricing')">定价方案</a>
           <a @click="scrollTo('cases')">应用案例</a>
-          <a href="/dashboard" v-if="auth.isLoggedIn">进入工作台</a>
+          <a href="/app/dashboard" v-if="auth.isLoggedIn">进入工作台</a>
+          <a href="/admin" v-if="auth.isLoggedIn && auth.isAdmin">管理后台</a>
           <template v-else>
             <a-button type="text" @click="showLogin = true">登录</a-button>
             <a-button type="primary" @click="showRegister = true">免费注册</a-button>
@@ -275,7 +276,7 @@ async function handleLogin() {
     await auth.login(loginForm.username, loginForm.password)
     message.success('登录成功')
     showLogin.value = false
-    router.push('/dashboard')
+    router.push('/app/dashboard')
   } catch {
     // error handled by interceptor
   } finally {
@@ -305,7 +306,7 @@ async function handleRegister() {
     })
     message.success('注册成功')
     showRegister.value = false
-    router.push('/dashboard')
+    router.push('/app/dashboard')
   } catch {
     // error handled by interceptor
   } finally {

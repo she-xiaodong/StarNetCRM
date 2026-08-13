@@ -138,4 +138,51 @@ export function deleteTag(id: string) {
   return request.delete(`/tags/${id}`)
 }
 
+// ─── 首页统计 ───
+export interface DashboardStats {
+  total_contacts: number
+  total_relations: number
+  active_referrals: number
+  network_score: number
+  recent_contacts: {
+    id: string
+    name: string
+    company?: string
+    title?: string
+    tags?: string
+    created_at?: string
+  }[]
+}
+export function getDashboardStats() {
+  return request.get<DashboardStats>('/stats/dashboard')
+}
+
+// ─── 人脉分析 ───
+export interface AnalyticsStats {
+  active_relations: number
+  week_new_contacts: number
+  avg_path_length: number
+  isolated_nodes: number
+  relation_distribution: {
+    type: string
+    label: string
+    count: number
+    percent: number
+  }[]
+  growth_trend: {
+    month: string
+    count: number
+  }[]
+  super_connectors: {
+    id: string
+    name: string
+    company?: string
+    degree: number
+    top_connection?: string
+  }[]
+}
+export function getAnalytics() {
+  return request.get<AnalyticsStats>('/stats/analytics')
+}
+
 export default request

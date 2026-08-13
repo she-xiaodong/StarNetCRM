@@ -8,7 +8,7 @@
         <a-card size="small">
           <a-statistic
             title="活跃关系链数"
-            :value="356"
+            :value="metrics.active_relations"
             suffix="条"
             value-style="color: #2B5FD7"
           />
@@ -18,7 +18,7 @@
         <a-card size="small">
           <a-statistic
             title="本周新增联系人"
-            :value="12"
+            :value="metrics.week_new_contacts"
             suffix="人"
             value-style="color: #52C41A"
           />
@@ -28,7 +28,7 @@
         <a-card size="small">
           <a-statistic
             title="平均路径长度"
-            :value="2.8"
+            :value="metrics.avg_path_length"
             precision="1"
             suffix="度"
             value-style="color: #FA8C16"
@@ -39,7 +39,7 @@
         <a-card size="small">
           <a-statistic
             title="孤立节点"
-            :value="5"
+            :value="metrics.isolated_nodes"
             suffix="人"
             value-style="color: #FF6B6B"
           />
@@ -76,7 +76,7 @@
               >
                 <div
                   class="trend-bar"
-                  :style="{ height: (item.count / 50) * 100 + '%' }"
+                  :style="{ height: barHeight(item.count) + '%' }"
                 ></div>
                 <span class="trend-label">{{ item.month }}</span>
                 <span class="trend-value">{{ item.count }}</span>
@@ -105,7 +105,7 @@
           </template>
           <template v-if="column.key === 'degree'">
             <a-progress
-              :percent="(record.degree / 50) * 100"
+              :percent="degreePercent(record.degree)"
               :size="20"
               :showInfo="false"
             />
@@ -118,39 +118,80 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
+import { getAnalytics } from '../api'
 
-const relationDistribution = ref([
-  { type: 'colleague', label: '同事', count: 120, percent: 34, color: '#4A90D9' },
-  { type: 'customer', label: '客户', count: 98, percent: 27, color: '#52C41A' },
-  { type: 'partner', label: '合作伙伴', count: 65, percent: 18, color: '#FA8C16' },
-  { type: 'alumni', label: '校友', count: 42, percent: 12, color: '#722ED1' },
-  { type: 'friend', label: '朋友/其他', count: 31, percent: 9, color: '#8C8C8C' },
-])
+const relationColorPalette = ['#4A90D9', '#52C41A', '#FA8C16', '#722ED1', '#8C8C8C', '#2B5FD7', '#EB2F96', '#13C2C2']
 
-const growthData = ref([
-  { month: '1月', count: 28 },
-  { month: '2月', count: 32 },
-  { month: '3月', count: 35 },
-  { month: '4月', count: 40 },
-  { month: '5月', count: 38 },
-  { month: '6月', count: 45 },
-  { month: '7月', count: 50 },
-  { month: '8月', count: 48 },
-])
+const metrics = ref({
+  active_relations: 0,
+  week_new_contacts: 0,
+  avg_path_length: 0,
+  isolated_nodes: 0,
+})
+
+const relationDistribution = ref<{ type: string; label: string; count: number; percent: number; color: string }[]>([])
+const growthData = ref<{ month: string; count: number }[]>([])
 
 const superConnectorColumns = [
   { title: '姓名', key: 'name' },
   { title: '公司', dataIndex: 'company' },
   { title: '关系数', key: 'degree', width: 250 },
-  { title: '最有价值的连接', dataIndex: 'topConnection' },
+  { title: '最有价值的连接', dataIndex: 'top_connection' },
 ]
 
-const superConnectors = ref([
-  { id: '1', name: '张三', company: '阿里巴巴', degree: 48, topConnection: '腾讯/百度/华为高管层' },
-  { id: '2', name: '王五', company: '字节跳动', degree: 35, topConnection: '投资圈/创业圈核心人物' },
-  { id: '3', name: '李四', company: '腾讯科技', degree: 28, topConnection: '互联网产品/技术圈' },
-])
+const superConnectors = ref<{ id: string; name: string; company?: string; degree: number; top_connection?: string }[]>([])
+
+const maxDegree = ref(0)
+const maxTrend = ref(0)
+
+function barHeight(count: number) {
+  if (!maxTrend.value || !count) return 4
+  return Math.max(4, Math.round((count / maxTrend.value) * 100))
+}
+
+function degreePercent(degree: number) {
+  if (!maxDegree.value || !degree) return 0
+  return Math.round((degree / maxDegree.value) * 100)
+}
+
+function parseTags(tags?: string): string[] {
+  if (!tags) return []
+  try {
+    const arr = JSON.parse(tags)
+    return Array.isArray(arr) ? arr : []
+  } catch {
+    return []
+  }
+}
+
+function loadAnalytics() {
+  getAnalytics().then((res: any) => {
+    const data = res.data?.data
+    if (!data) return
+    metrics.value = {
+      active_relations: data.active_relations ?? 0,
+      week_new_contacts: data.week_new_contacts ?? 0,
+      avg_path_length: data.avg_path_length ?? 0,
+      isolated_nodes: data.isolated_nodes ?? 0,
+    }
+    relationDistribution.value = (data.relation_distribution || []).map(
+      (item: any, idx: number) => ({
+        type: item.type,
+        label: item.label,
+        count: item.count,
+        percent: item.percent,
+        color: relationColorPalette[idx % relationColorPalette.length],
+      }),
+    )
+    growthData.value = data.growth_trend || []
+    maxTrend.value = Math.max(1, ...growthData.value.map((i) => i.count))
+    superConnectors.value = data.super_connectors || []
+    maxDegree.value = Math.max(1, ...superConnectors.value.map((i) => i.degree ?? 0))
+  })
+}
+
+onMounted(loadAnalytics)
 </script>
 
 <style lang="less" scoped>

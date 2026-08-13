@@ -15,10 +15,15 @@ type Contact struct {
 	Phone      string    `gorm:"column:phone;type:varchar(20)" json:"phone"`
 	Email      string    `gorm:"column:email;type:varchar(100)" json:"email"`
 	Department string    `gorm:"column:department;type:varchar(100)" json:"department"`
-	Tags       string    `gorm:"column:tags;type:json" json:"tags"` // JSON数组
+	Tags       string    `gorm:"column:tags;type:json" json:"tags"`                    // JSON数组
+	ReferrerID string    `gorm:"column:referrer_id;type:varchar(36);index:idx_referrer" json:"referrer_id"` // 引荐人PersonID（空=直接人脉）
 	CreatedBy  string    `gorm:"column:created_by;type:varchar(36)" json:"created_by"`
 	CreatedAt  time.Time `gorm:"column:created_at;autoCreateTime" json:"created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at;autoUpdateTime" json:"updated_at"`
+
+	// 引荐路径（运行时计算，不存储MySQL）：["我","张三","李四"]
+	ReferrerPath     []string `gorm:"-" json:"referrer_path,omitempty"`
+	ReferrerPathText string   `gorm:"-" json:"referrer_path_text,omitempty"`
 
 	// Neo4j中Person的额外属性（不存储MySQL，仅用于传输）
 	WecomID  string `gorm:"-" json:"wecom_id"`

@@ -23,7 +23,8 @@ func seedContactsForUser(username string) error {
 	repomysql.DB.Model(&model.Contact{}).Where("created_by = ?", user.ID).Count(&count)
 	if count >= 356 {
 		fmt.Printf("用户 %s 已有 %d 条联系人数据，跳过种子录入\n", username, count)
-		return nil
+		// 已有数据也需要建立引荐层级
+		return buildReferralHierarchy(user)
 	}
 
 	fmt.Printf("为用户 %s (ID: %s) 生成356条联系人数据...\n", username, user.ID)
@@ -78,7 +79,8 @@ func seedContactsForUser(username string) error {
 			Color:    randomTagColor(rng),
 		}
 		repomysql.DB.Where("name = ? AND tenant_id = ?", name, user.TenantID).FirstOrCreate(&tag)
-		tagMap[name] = tag.ID
+		// 存储标签名称而非 ID，与前端 tagOptions（value 为名称）保持一致
+		tagMap[name] = name
 	}
 
 	// ─── 批量生成联系人 ───
@@ -139,6 +141,84 @@ func seedContactsForUser(username string) error {
 	}
 
 	fmt.Printf("✅ 完成！已为用户 %s 录入 %d 条联系人关系数据\n", username, total)
+
+	return buildReferralHierarchy(user)
+}
+
+// buildReferralHierarchy 为用户的联系人建立多级引荐层级
+// 比例：一级约40%（无引荐人）、二级35%、三级18%、四级7%
+// 二级引用一级、三级引用二级、四级引用三级，形成 我 → 一级 → 二级 → 三级 → 四级 的引荐链
+func buildReferralHierarchy(user model.User) error {
+	var contacts []model.Contact
+	if err := repomysql.DB.Where("tenant_id = ? AND created_by = ?", user.TenantID, user.ID).Find(&contacts).Error; err != nil {
+		return fmt.Errorf("查询联系人失败: %w", err)
+	}
+	if len(contacts) == 0 {
+		fmt.Printf("用户 %s 无联系人数据，跳过引荐层级构建\n", user.Username)
+		return nil
+	}
+
+	// 幂等：已建立过引荐层级则跳过
+	var hasRef int64
+	repomysql.DB.Model(&model.Contact{}).
+		Where("tenant_id = ? AND created_by = ? AND referrer_id <> ''", user.TenantID, user.ID).
+		Count(&hasRef)
+	if hasRef > 0 {
+		fmt.Printf("用户 %s 已建立引荐层级（%d 条含引荐人），跳过\n", user.Username, hasRef)
+		return nil
+	}
+
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
+	rng.Shuffle(len(contacts), func(i, j int) { contacts[i], contacts[j] = contacts[j], contacts[i] })
+
+	// 按比例划分层级
+	total := len(contacts)
+	n1 := int(float64(total) * 0.40)
+	n2 := int(float64(total) * 0.35)
+	n3 := int(float64(total) * 0.18)
+
+	var lvl1, lvl2, lvl3, lvl4 []*model.Contact
+	for i := range contacts {
+		c := &contacts[i]
+		switch {
+		case i < n1:
+			lvl1 = append(lvl1, c)
+		case i < n1+n2:
+			lvl2 = append(lvl2, c)
+		case i < n1+n2+n3:
+			lvl3 = append(lvl3, c)
+		default:
+			lvl4 = append(lvl4, c)
+		}
+	}
+
+	// 为下一级指定随机引荐人
+	assign := func(list, pool []*model.Contact) {
+		for _, c := range list {
+			if len(pool) == 0 {
+				continue
+			}
+			c.ReferrerID = pool[rng.Intn(len(pool))].PersonID
+		}
+	}
+	assign(lvl2, lvl1)
+	assign(lvl3, lvl2)
+	assign(lvl4, lvl3)
+
+	// 批量更新引荐人
+	for _, c := range append(append(append([]*model.Contact{}, lvl2...), lvl3...), lvl4...) {
+		if c.ReferrerID == "" {
+			continue
+		}
+		if err := repomysql.DB.Model(&model.Contact{}).
+			Where("id = ?", c.ID).
+			Update("referrer_id", c.ReferrerID).Error; err != nil {
+			return fmt.Errorf("更新引荐人失败: %w", err)
+		}
+	}
+
+	fmt.Printf("✅ 已为用户 %s 建立引荐层级（一级%d / 二级%d / 三级%d / 四级%d）\n",
+		user.Username, len(lvl1), len(lvl2), len(lvl3), len(lvl4))
 	return nil
 }
 

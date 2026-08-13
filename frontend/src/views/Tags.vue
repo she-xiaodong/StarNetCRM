@@ -20,6 +20,9 @@
         <template v-if="column.key === 'name'">
           <a-tag :color="record.color || '#2B5FD7'">{{ record.name }}</a-tag>
         </template>
+        <template v-if="column.key === 'created_at'">
+          {{ formatDateTime(record.created_at) }}
+        </template>
         <template v-if="column.key === 'action'">
           <a-space>
             <a @click="handleEdit(record)">编辑</a>
@@ -70,6 +73,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { getTags, createTag, updateTag, deleteTag } from '@/api'
+import { formatDateTime } from '@/utils/format'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -82,7 +86,7 @@ const presetColors = ['#2B5FD7', '#52C41A', '#FA8C16', '#F5222D', '#722ED1', '#1
 const columns = [
   { title: '标签名称', key: 'name', width: 200 },
   { title: '类型', dataIndex: 'type', width: 120 },
-  { title: '创建时间', dataIndex: 'created_at', width: 180 },
+  { title: '创建时间', dataIndex: 'created_at', key: 'created_at', width: 180 },
   { title: '操作', key: 'action', width: 140 },
 ]
 

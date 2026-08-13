@@ -48,6 +48,15 @@
           </a-tag>
           <span v-if="!parseTags(record.tags).length" style="color: #ccc">-</span>
         </template>
+        <template v-if="column.key === 'referrer_path'">
+          <a-tag v-if="!record.referrer_id" color="green" size="small">直接人脉</a-tag>
+          <a-tooltip v-else :title="record.referrer_path_text">
+            <span class="referrer-path-text">{{ record.referrer_path_text || '—' }}</span>
+          </a-tooltip>
+        </template>
+        <template v-if="column.key === 'created_at'">
+          {{ formatDateTime(record.created_at) }}
+        </template>
         <template v-if="column.key === 'action'">
           <a-space>
             <a @click="handleEdit(record)">编辑</a>
@@ -103,13 +112,25 @@
               <a-input v-model:value="form.email" placeholder="请输入邮箱" />
             </a-form-item>
           </a-col>
-          <a-col :span="24">
+          <a-col :span="12">
             <a-form-item label="标签">
               <a-select
                 v-model:value="form.tags"
                 mode="multiple"
                 placeholder="选择标签"
                 :options="tagOptions"
+              />
+            </a-form-item>
+          </a-col>
+          <a-col :span="12">
+            <a-form-item label="引荐人">
+              <a-select
+                v-model:value="form.referrer_id"
+                placeholder="选择引荐人（留空=直接人脉）"
+                allow-clear
+                show-search
+                option-filter-prop="label"
+                :options="referrerOptions"
               />
             </a-form-item>
           </a-col>
@@ -129,6 +150,7 @@ import { ref, reactive, onMounted } from 'vue'
 import { message } from 'ant-design-vue'
 import { PlusOutlined } from '@ant-design/icons-vue'
 import { getContacts, createContact, updateContact, deleteContact, getTags } from '@/api'
+import { formatDateTime } from '@/utils/format'
 
 const loading = ref(false)
 const saving = ref(false)
@@ -143,8 +165,9 @@ const columns = [
   { title: '职位', dataIndex: 'title' },
   { title: '部门', dataIndex: 'department' },
   { title: '手机号', dataIndex: 'phone' },
+  { title: '引荐路径', key: 'referrer_path', width: 240 },
   { title: '标签', key: 'tags', width: 160 },
-  { title: '创建时间', dataIndex: 'created_at' },
+  { title: '创建时间', dataIndex: 'created_at', key: 'created_at' },
   { title: '操作', key: 'action', width: 140 },
 ]
 
@@ -166,8 +189,24 @@ const form = reactive({
   phone: '',
   email: '',
   tags: [] as string[],
+  referrer_id: '' as string,
   note: '',
 })
+
+// 引荐人候选（全量联系人，排除自己）
+const referrerOptions = ref<{ label: string; value: string }[]>([])
+
+async function fetchReferrerCandidates() {
+  try {
+    const res = await getContacts({ page: 1, page_size: 500 })
+    const list = res.data.data.list || []
+    referrerOptions.value = list
+      .filter((c: any) => !editingContact.value || c.id !== editingContact.value.id)
+      .map((c: any) => ({ label: `${c.name}${c.company ? '（' + c.company + '）' : ''}`, value: c.person_id || c.id }))
+  } catch {
+    referrerOptions.value = []
+  }
+}
 
 // 解析 tags 字段（可能是 JSON 字符串或数组）
 function parseTags(tags: any): string[] {
@@ -233,8 +272,9 @@ function openCreate() {
   editingContact.value = null
   Object.assign(form, {
     name: '', company: '', title: '', department: '',
-    phone: '', email: '', tags: [], note: '',
+    phone: '', email: '', tags: [], referrer_id: '', note: '',
   })
+  fetchReferrerCandidates()
   showModal.value = true
 }
 
@@ -248,8 +288,10 @@ function handleEdit(record: any) {
     phone: record.phone || '',
     email: record.email || '',
     tags: parseTags(record.tags),
+    referrer_id: record.referrer_id || '',
     note: record.note || '',
   })
+  fetchReferrerCandidates()
   showModal.value = true
 }
 
@@ -268,6 +310,7 @@ async function handleSave() {
       phone: form.phone,
       email: form.email,
       tags: form.tags,
+      referrer_id: form.referrer_id || '',
       note: form.note,
     }
     if (editingContact.value) {
@@ -319,6 +362,10 @@ onMounted(() => {
   .contact-name-cell {
     display: flex;
     align-items: center;
+  }
+  .referrer-path-text {
+    color: #2b5fd7;
+    font-size: 13px;
   }
   .text-danger {
     color: #ff4d4f;
